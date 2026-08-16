@@ -121,6 +121,27 @@ app.post('/api/admin/promote', async (req, res) => {
   }
 });
 
+// ---------------- EXCLUIR USUÁRIO ----------------
+// Também protegido pela ADMIN_SETUP_KEY. Não apaga os registros já feitos por
+// esse usuário (ficam no histórico), só impede que ele entre de novo.
+app.delete('/api/admin/users/:name', async (req, res) => {
+  const { setupKey } = req.body || {};
+  if (!process.env.ADMIN_SETUP_KEY) {
+    return res.status(400).json({ ok: false, error: 'ADMIN_SETUP_KEY não configurada no servidor.' });
+  }
+  if (!setupKey || setupKey !== process.env.ADMIN_SETUP_KEY) {
+    return res.status(401).json({ ok: false, error: 'Chave inválida.' });
+  }
+  try {
+    const { rowCount } = await pool.query('DELETE FROM users WHERE LOWER(name) = LOWER($1)', [req.params.name]);
+    if (rowCount === 0) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Erro ao excluir usuário.' });
+  }
+});
+
 // ---------------- REGISTROS DE MANUTENÇÃO ----------------
 app.get('/api/records', async (req, res) => {
   try {
