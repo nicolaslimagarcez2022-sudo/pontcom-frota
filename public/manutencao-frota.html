@@ -837,6 +837,33 @@
     `;
   }
 
+  async function excluirUsuario(nome){
+    if(nome === currentUser){
+      showToast('Você não pode excluir a conta com a qual está logado.');
+      return;
+    }
+    const chave = window.prompt(`Pra excluir o usuário "${nome}", digite a chave de admin (ADMIN_SETUP_KEY) configurada no servidor:`);
+    if(chave === null) return;
+    if(!chave.trim()){ showToast('Chave não informada.'); return; }
+    if(!confirm(`Confirma excluir o usuário "${nome}"? O histórico dele continua salvo, mas ele não vai mais conseguir entrar.`)) return;
+
+    try{
+      const resp = await fetch(API_BASE + '/admin/users/' + encodeURIComponent(nome), {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ setupKey: chave.trim() })
+      });
+      const data = await resp.json();
+      if(!resp.ok || !data.ok){ showToast(data.error || 'Erro ao excluir usuário.'); return; }
+      showToast('Usuário excluído.');
+      adminExpanded.delete(nome);
+      await loadUsers();
+      renderAdmin();
+    }catch(e){
+      showToast('Não foi possível conectar ao servidor.');
+    }
+  }
+
   function renderAdmin(){
     renderAdminFuncList();
     const termo = $('admin-search').value.trim().toLowerCase();
@@ -907,6 +934,20 @@
         historico.style.display = 'flex';
         historico.style.flexDirection = 'column';
         historico.style.gap = '10px';
+
+        const temConta = users.some(u => u.name === l.nome);
+        if(temConta){
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'btn btn-danger';
+          delBtn.style.alignSelf = 'flex-start';
+          delBtn.textContent = 'Excluir usuário';
+          delBtn.addEventListener('click', (ev)=>{
+            ev.stopPropagation();
+            excluirUsuario(l.nome);
+          });
+          historico.appendChild(delBtn);
+        }
 
         if(l.ordenados.length === 0){
           historico.innerHTML = '<div style="color:var(--muted);font-size:13px;">Nenhum registro ainda.</div>';
