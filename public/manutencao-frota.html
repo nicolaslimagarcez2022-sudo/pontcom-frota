@@ -621,8 +621,12 @@
     return t === 'peca' ? 'Peça' : t === 'oleo' ? 'Óleo' : 'Combustível';
   }
 
+  function myRecords(){
+    return records.filter(r => r.usuario === currentUser);
+  }
+
   function renderPlacaOptions(){
-    const placas = [...new Set(records.map(r=>r.placa))].sort();
+    const placas = [...new Set(myRecords().map(r=>r.placa))].sort();
     const dl = $('placas-list');
     dl.innerHTML = '';
     placas.forEach(p=>{
@@ -655,7 +659,7 @@
     const fTipo = $('filter-tipo').value;
     const fTexto = $('filter-texto').value.trim().toLowerCase();
 
-    let filtered = records.filter(r=>{
+    let filtered = myRecords().filter(r=>{
       if(fPlaca && r.placa !== fPlaca) return false;
       if(fTipo && r.tipo !== fTipo) return false;
       if(fTexto){
@@ -715,9 +719,10 @@
 
   // ---------------- PAINEL / ALERTAS DE ÓLEO ----------------
   function oleoStatusPorPlaca(){
-    const placas = [...new Set(records.map(r=>r.placa))];
+    const meus = myRecords();
+    const placas = [...new Set(meus.map(r=>r.placa))];
     return placas.map(placa=>{
-      const regsMoto = records.filter(r=>r.placa===placa);
+      const regsMoto = meus.filter(r=>r.placa===placa);
       const maxKm = Math.max(...regsMoto.map(r=>r.km));
       const trocasOleo = regsMoto.filter(r=>r.tipo==='oleo').sort((a,b)=> b.km - a.km);
       const ultimaTroca = trocasOleo[0];
@@ -774,10 +779,11 @@
       });
     }
 
-    const totalMotos = new Set(records.map(r=>r.placa)).size;
-    const totalPecas = records.filter(r=>r.tipo==='peca').length;
-    const totalOleo = records.filter(r=>r.tipo==='oleo').length;
-    const totalGas = records.filter(r=>r.tipo==='gasolina').length;
+    const meus = myRecords();
+    const totalMotos = new Set(meus.map(r=>r.placa)).size;
+    const totalPecas = meus.filter(r=>r.tipo==='peca').length;
+    const totalOleo = meus.filter(r=>r.tipo==='oleo').length;
+    const totalGas = meus.filter(r=>r.tipo==='gasolina').length;
     $('painel-resumo').innerHTML = `
       Veículos cadastrados: <b style="color:var(--text)">${totalMotos}</b><br>
       Peças trocadas (total): <b style="color:var(--text)">${totalPecas}</b><br>
@@ -795,6 +801,8 @@
   }
 
   // ---------------- FUNCIONÁRIOS (ADMIN) ----------------
+  let adminExpanded = new Set();
+
   function distinctFuncionarios(){
     const doRegistros = records.map(r => r.usuario).filter(Boolean);
     const doCadastro = users.map(u => u.name);
@@ -811,68 +819,112 @@
     });
   }
 
+  function renderTicketHtml(r){
+    let extraLine = '';
+    if(r.tipo === 'oleo' && r.proximaTrocaKm) extraLine = `<div class="ticket-meta">Próxima troca em: <b>${r.proximaTrocaKm.toLocaleString('pt-BR')} km</b></div>`;
+    if(r.tipo === 'gasolina' && r.litros) extraLine = `<div class="ticket-meta">Litros: <b>${r.litros}</b></div>`;
+    return `
+      <div class="ticket-top">
+        <div>
+          <span class="ticket-placa">${escapeHtml(r.placa)}</span>
+          <div class="ticket-tipo">${tipoLabel(r.tipo)}</div>
+        </div>
+        <div class="ticket-meta"><b>${r.km.toLocaleString('pt-BR')} km</b> · ${formatDate(r.data)}</div>
+      </div>
+      <div class="ticket-desc">${escapeHtml(r.descricao)}</div>
+      ${r.obs ? `<div class="ticket-obs">"${escapeHtml(r.obs)}"</div>` : ''}
+      ${extraLine}
+    `;
+  }
+
   function renderAdmin(){
     renderAdminFuncList();
     const termo = $('admin-search').value.trim().toLowerCase();
     const summaryEl = $('admin-summary');
     const listEl = $('admin-ticket-list');
 
-    if(!termo){
+    const nomes = distinctFuncionarios().filter(n => !termo || n.toLowerCase().includes(termo));
+
+    if(nomes.length === 0){
       summaryEl.innerHTML = '';
-      listEl.innerHTML = '<div class="empty-state"><div class="display">Busque um funcionário</div>Digite o nome acima para ver tudo que ele registrou.</div>';
+      listEl.innerHTML = '<div class="empty-state"><div class="display">Nada encontrado</div>Nenhum funcionário com esse nome.</div>';
       return;
     }
 
-    const doFuncionario = records.filter(r => (r.usuario||'').toLowerCase().includes(termo));
-
-    if(doFuncionario.length === 0){
-      summaryEl.innerHTML = '';
-      listEl.innerHTML = '<div class="empty-state"><div class="display">Nada encontrado</div>Nenhum registro desse funcionário ainda.</div>';
-      return;
-    }
-
-    const placas = new Set(doFuncionario.map(r=>r.placa));
-    const totalPecas = doFuncionario.filter(r=>r.tipo==='peca').length;
-    const totalOleo = doFuncionario.filter(r=>r.tipo==='oleo').length;
-    const totalGas = doFuncionario.filter(r=>r.tipo==='gasolina').length;
-    const ultimo = [...doFuncionario].sort((a,b)=> (b.data+b.criadoEm).localeCompare(a.data+a.criadoEm))[0];
+    const linhas = nomes.map(nome=>{
+      const doFunc = records.filter(r => r.usuario === nome);
+      const placas = new Set(doFunc.map(r=>r.placa));
+      const ordenados = [...doFunc].sort((a,b)=> (b.data+b.criadoEm).localeCompare(a.data+a.criadoEm));
+      const ultimo = ordenados[0] || null;
+      return { nome, total: doFunc.length, veiculos: placas.size, ultimo, ordenados };
+    }).sort((a,b)=>{
+      if(!a.ultimo && !b.ultimo) return a.nome.localeCompare(b.nome);
+      if(!a.ultimo) return 1;
+      if(!b.ultimo) return -1;
+      return (b.ultimo.data+b.ultimo.criadoEm).localeCompare(a.ultimo.data+a.ultimo.criadoEm);
+    });
 
     summaryEl.innerHTML = `
       <div class="card">
-        <h2>Resumo</h2>
+        <h2>Funcionários</h2>
         <div style="font-size:14px;color:var(--muted);">
-          Total de registros: <b style="color:var(--text)">${doFuncionario.length}</b><br>
-          Veículos atendidos: <b style="color:var(--text)">${placas.size}</b><br>
-          Peças trocadas: <b style="color:var(--text)">${totalPecas}</b><br>
-          Trocas de óleo: <b style="color:var(--text)">${totalOleo}</b><br>
-          Abastecimentos: <b style="color:var(--text)">${totalGas}</b><br>
-          Último registro: <b style="color:var(--text)">${formatDate(ultimo.data)} · ${escapeHtml(ultimo.placa)}</b>
+          ${nomes.length} funcionário${nomes.length===1?'':'s'} · ${records.length} registro${records.length===1?'':'s'} no total · clique num nome para ver o histórico
         </div>
       </div>
     `;
 
-    const ordenados = [...doFuncionario].sort((a,b)=> (b.data+b.criadoEm).localeCompare(a.data+a.criadoEm));
     listEl.innerHTML = '';
-    ordenados.forEach(r=>{
-      const div = document.createElement('div');
-      div.className = 'ticket tipo-' + r.tipo;
-      let extraLine = '';
-      if(r.tipo === 'oleo' && r.proximaTrocaKm) extraLine = `<div class="ticket-meta">Próxima troca em: <b>${r.proximaTrocaKm.toLocaleString('pt-BR')} km</b></div>`;
-      if(r.tipo === 'gasolina' && r.litros) extraLine = `<div class="ticket-meta">Litros: <b>${r.litros}</b></div>`;
-      div.innerHTML = `
+    linhas.forEach(l=>{
+      const aberto = adminExpanded.has(l.nome);
+
+      const card = document.createElement('div');
+      card.className = 'ticket';
+
+      const head = document.createElement('div');
+      head.style.cursor = 'pointer';
+      head.innerHTML = `
         <div class="ticket-top">
           <div>
-            <span class="ticket-placa">${escapeHtml(r.placa)}</span>
-            <div class="ticket-tipo">${tipoLabel(r.tipo)}</div>
+            <span class="ticket-placa">${aberto ? '▾' : '▸'} ${escapeHtml(l.nome)}</span>
+            <div class="ticket-tipo">${l.total} registro${l.total===1?'':'s'} · ${l.veiculos} veículo${l.veiculos===1?'':'s'}</div>
           </div>
-          <div class="ticket-meta"><b>${r.km.toLocaleString('pt-BR')} km</b> · ${formatDate(r.data)}</div>
+          <div class="ticket-meta">${l.ultimo ? formatDate(l.ultimo.data) : 'sem registros'}</div>
         </div>
-        <div class="ticket-desc">${escapeHtml(r.descricao)}</div>
-        ${r.obs ? `<div class="ticket-obs">"${escapeHtml(r.obs)}"</div>` : ''}
-        ${extraLine}
-        <div class="ticket-foot"><span>Registrado por ${escapeHtml(r.usuario)}</span></div>
+        ${(!aberto && l.ultimo) ? `<div class="ticket-desc">Último: ${escapeHtml(l.ultimo.placa)} · ${tipoLabel(l.ultimo.tipo)} — ${escapeHtml(l.ultimo.descricao)}</div>` : ''}
       `;
-      listEl.appendChild(div);
+      head.addEventListener('click', ()=>{
+        if(adminExpanded.has(l.nome)) adminExpanded.delete(l.nome);
+        else adminExpanded.add(l.nome);
+        renderAdmin();
+      });
+      card.appendChild(head);
+
+      if(aberto){
+        const historico = document.createElement('div');
+        historico.style.marginTop = '12px';
+        historico.style.paddingTop = '12px';
+        historico.style.borderTop = '1px solid var(--border)';
+        historico.style.display = 'flex';
+        historico.style.flexDirection = 'column';
+        historico.style.gap = '10px';
+
+        if(l.ordenados.length === 0){
+          historico.innerHTML = '<div style="color:var(--muted);font-size:13px;">Nenhum registro ainda.</div>';
+        } else {
+          l.ordenados.forEach(r=>{
+            const item = document.createElement('div');
+            item.style.background = 'var(--surface2)';
+            item.style.border = '1px solid var(--border)';
+            item.style.borderRadius = '4px';
+            item.style.padding = '10px 12px';
+            item.innerHTML = renderTicketHtml(r);
+            historico.appendChild(item);
+          });
+        }
+        card.appendChild(historico);
+      }
+
+      listEl.appendChild(card);
     });
   }
 
